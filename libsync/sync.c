@@ -41,7 +41,7 @@ int sync_merge(const char *name, int fd1, int fd2)
     int err;
 
     data.fd2 = fd2;
-    strlcpy(data.name, name, sizeof(data.name));
+    strncpy(data.name, name, sizeof(data.name));
 
     err = ioctl(fd1, SYNC_IOC_MERGE, &data);
     if (err < 0)
@@ -107,7 +107,7 @@ int sw_sync_fence_create(int fd, const char *name, unsigned value)
     int err;
 
     data.value = value;
-    strlcpy(data.name, name, sizeof(data.name));
+    strncpy(data.name, name, sizeof(data.name));
 
     err = ioctl(fd, SW_SYNC_IOC_CREATE_FENCE, &data);
     if (err < 0)
