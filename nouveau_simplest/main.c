@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, NVIDIA CORPORATION. All rights reserved.
+ * Copyright (c) 2014-2015, NVIDIA CORPORATION. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -23,7 +23,7 @@
 /*
  * Build with:
  *
- *    $ gcc -o test-submit-fence test-submit-fence.c -ldrm_nouveau -lsync
+ *    $ gcc -o nouveau_simplest main.c -ldrm_nouveau -lsync
  *
  * Depends on libsync.so being built and installed (source at ../libsync).
  */
@@ -33,11 +33,11 @@
 #include <libdrm/nouveau.h>
 #include <stdio.h>
 #include <string.h>
-#include <sync/sw_sync.h>
+#include <sw_sync.h>
 #include <sync/sync.h>
 #include <unistd.h>
 
-int sync_fence_status(int fd)
+static int sync_fence_status(int fd)
 {
 	int status;
 	struct sync_fence_info_data *data;
@@ -51,14 +51,27 @@ int sync_fence_status(int fd)
 
 int main(int argc, char *argv[])
 {
-	int err, fd = -1, fence = -1, timeline;
+	int err, i, fd = -1, fence = -1, timeline;
 	struct nouveau_device *dev = NULL;
 	struct nouveau_client *client = NULL;
 	struct nouveau_pushbuf *push = NULL;
 	struct nouveau_object *chan = NULL, *threed = NULL;
 	struct nvc0_fifo nvc0_data = { };
+	bool use_fences = false;
+	const char *devname = NULL;
 
-	if (argc != 2) {
+	i = 1;
+	while (i < argc) {
+		const char *arg = argv[i++];
+		if (!strcmp(arg, "--fence"))
+			use_fences = true;
+		else {
+			devname = arg;
+			break;
+		}
+	}
+
+	if (i != argc || !devname) {
 		printf("Usage: %s <drm-file>\n", argv[0]);
 		return 1;
 	}
@@ -113,58 +126,67 @@ int main(int argc, char *argv[])
 	*push->cur++ = 0x20010040; // NO_OPERATION
 	*push->cur++ = 0x00000000;
 
+	if (use_fences) {
 #if 0
-	timeline = sw_sync_timeline_create();
-	if (timeline < 0) {
-		err = timeline;
-		printf("sw_sync_timeline_create failed: %s\n", strerror(err));
-		printf("Do you have CONFIG_SW_SYNC_USER enabled in your kernel?\n");
-		goto out;
-	}
+		timeline = sw_sync_timeline_create();
+		if (timeline < 0) {
+			err = timeline;
+			printf("sw_sync_timeline_create failed: %s\n", strerror(err));
+			printf("Do you have CONFIG_SW_SYNC_USER enabled in your kernel?\n");
+			goto out;
+		}
 
-	fence = sw_sync_fence_create(timeline, argv[0], 1);
-	if (fence < 0) {
-		err = fence;
-		printf("sw_sync_fence_create failed: %s\n", strerror(err));
-		goto out;
-	}
+		fence = sw_sync_fence_create(timeline, argv[0], 1);
+		if (fence < 0) {
+			err = fence;
+			printf("sw_sync_fence_create failed: %s\n", strerror(err));
+			goto out;
+		}
 #endif
 
-	err = nouveau_pushbuf_kick_fence(push, NULL, &fence);
-	if (err) {
-		printf("nouveau_pushbuf_kick_fence failed: %s\n", strerror(err));
-		goto out;
-	}
+		err = nouveau_pushbuf_kick_fence(push, NULL, &fence);
+		if (err) {
+			printf("nouveau_pushbuf_kick_fence failed: %s\n", strerror(err));
+			goto out;
+		}
 
-	printf("Status immediately after kick: %d\n", sync_fence_status(fence));
+		printf("Status immediately after kick: %d\n", sync_fence_status(fence));
 
-	// Sleep for 100ms to make sure that gpu gets stalled.
-	printf("Sleeping...\n");
-	usleep(100 * 1000);
+		// Sleep for 100ms to make sure that gpu gets stalled.
+		printf("Sleeping...\n");
+		usleep(100 * 1000);
 
-	printf("Status after sleeping: %d\n", sync_fence_status(fence));
+		printf("Status after sleeping: %d\n", sync_fence_status(fence));
 
 #if 0
-	// Verify that the fence is still active.
-	err = sync_fence_status(fence);
-	if (err) {
-		printf("fence status should be active but is %d\n", err);
-		goto out;
-	}
+		// Verify that the fence is still active.
+		err = sync_fence_status(fence);
+		if (err) {
+			printf("fence status should be active but is %d\n", err);
+			goto out;
+		}
 
-	// Signal the pre-fence so that gpu can start.
-	err = sw_sync_timeline_inc(timeline, 1);
-	if (err) {
-		printf("sw_sync_timeline_inc failed: %s\n", strerror(err));
-		goto out;
-	}
+		// Signal the pre-fence so that gpu can start.
+		err = sw_sync_timeline_inc(timeline, 1);
+		if (err) {
+			printf("sw_sync_timeline_inc failed: %s\n", strerror(err));
+			goto out;
+		}
 #endif
 
-	printf("Waiting for fence: %d\n", fence);
-	err = sync_wait(fence, -1);
-	if (err) {
-		printf("sync_wait failed: %s\n", strerror(err));
-		goto out;
+		printf("Waiting for fence: %d\n", fence);
+		err = sync_wait(fence, -1);
+		if (err) {
+			printf("sync_wait failed: %s\n", strerror(err));
+			goto out;
+		}
+	} else {
+		err = nouveau_pushbuf_kick(push, NULL);
+		if (err) {
+			printf("nouveau_pushbuf_kick failed: %s\n", strerror(err));
+			goto out;
+		}
+		printf("nouveau_pushbuf_kick done, use --fence option to tell if it completed\n");
 	}
 
 out:
