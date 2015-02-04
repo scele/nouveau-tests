@@ -76,7 +76,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	fd = open(argv[1], O_RDWR);
+	fd = open(devname, O_RDWR);
 	if (fd < 0) {
 		err = fd;
 		printf("could not open %s: %s\n", argv[1], strerror(err));
